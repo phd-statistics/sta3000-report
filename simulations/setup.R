@@ -21,7 +21,7 @@ circulant_symmetric_mat <- function(p) {
 
 compute_metrics <- function(thetahat, ci_lower, ci_upper, pvals, theta0, S, alpha) {
   p <- length(theta0)
-  Sc <- setdiff(1:p, S) # Inactive set (S^c)
+  Sc <- setdiff(1:p, S) 
   s0 <- length(S)
   
   # Interval Lengths (Eq 57 & 58)
@@ -30,7 +30,7 @@ compute_metrics <- function(thetahat, ci_lower, ci_upper, pvals, theta0, S, alph
   avg_len_S <- mean(lengths[S])
   avg_len_Sc <- mean(lengths[Sc])
   
-  # Coverage Flags (1 if true theta is inside CI, 0 otherwise)
+  # Coverage Flags
   covered <- (theta0 >= ci_lower) & (theta0 <= ci_upper)
   
   # Average Coverage (Eq 59, 60, 61)
@@ -38,23 +38,23 @@ compute_metrics <- function(thetahat, ci_lower, ci_upper, pvals, theta0, S, alph
   dCov_S <- mean(covered[S])
   dCov_Sc <- mean(covered[Sc])
   
-  # False Positive and True Positive Rates
+  # Error Rates
   rejected <- (pvals < alpha) 
+  TPR <- sum(rejected[S]) / s0              
+  FPR <- sum(rejected[Sc]) / (p - s0)       
   
-  TPR <- sum(rejected[S]) / s0              # Power
-  FPR <- sum(rejected[Sc]) / (p - s0)       # Type I Error
-  
-  # Estimation Metrics (Using thetahat)
-  # Handle cases where a method might not return a point estimate
+  # Estimation Accuracy (Single numbers for easy averaging)
   if (!is.null(thetahat)) {
-    bias <- mean(thetahat - theta0)
-    mse <- mean((thetahat - theta0)^2)
+    # We store the MEAN bias and MEAN squared error of the vector
+    vec_bias <- mean(thetahat - theta0)
+    vec_mse  <- mean((thetahat - theta0)^2)
   } else {
-    bias <- NA
-    mse <- NA
+    vec_bias <- NA
+    vec_mse  <- NA
   }
   
-  return(list(
+  # Return ONLY single numeric values
+  return(c(
     AvgLength = avg_len,
     AvgLength_S = avg_len_S,
     AvgLength_Sc = avg_len_Sc,
@@ -63,8 +63,7 @@ compute_metrics <- function(thetahat, ci_lower, ci_upper, pvals, theta0, S, alph
     dCov_Sc = dCov_Sc,
     TPR = TPR,
     FPR = FPR,
-    Bias = bias,
-    MSE = mse,
-    Thetahat = thetahat # Returns the actual vector if you need it
+    MeanBias = vec_bias,
+    MeanMSE = vec_mse
   ))
 }

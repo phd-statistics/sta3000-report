@@ -1,7 +1,16 @@
 library(mvnfast)
 library(hdi)
+library(parallel)
+library(doParallel)
+library(foreach)
+
 source("lasso_inference.R")
 source("setup.R")
+
+# 1. SETUP CLUSTER
+cores_to_use <- 10
+cl <- makeCluster(cores_to_use, outfile = "") 
+registerDoParallel(cl)
 
 configurations <- list(
   c(n=1000, p=600, s0=10, b=0.5),
@@ -19,76 +28,77 @@ configurations <- list(
 )
 
 config_no <- length(configurations)
-res <- list(list(NULL), length(configurations)) #Pre-allocated List Vector
+res <- vector("list", config_no) 
+n_sims <- 20
+alpha <- 0.05
+# Critical value for 95% CI construction for the Projection methods
+z_crit <- qnorm(1 - alpha/2)
 
-n_sims <- 20 # Number of independent realizations
-res <- list() # Final results list
-
-for(i in 1:config_no){
-  set.seed(i)
-  # 1. Extract Configuration Parameters
+for(i in 7:config_no){
   dat <- configurations[[i]] 
-  n <- dat["n"]
-  p <- dat["p"]
-  s0 <- dat["s0"]
-  b <- dat["b"]
-  alpha <- 0.05
+  n <- dat["n"]; p <- dat["p"]; s0 <- dat["s0"]; b <- dat["b"]
   
   Sigma <- circulant_symmetric_mat(p)
   S <- sample(1:p, size = s0, replace = FALSE)
   theta0 <- rep(0, p) 
   theta0[S] <- b 
   
-  # Temporary lists to hold the 20 runs for this specific config
-  sim_sslasso <- list()
-  sim_multi <- list()
-  sim_ridge <- list()
-  sim_lasso_proj <- list()
+  cat(sprintf("\n--- Starting Config %d (n=%d, p=%d) ---\n", i, n, p))
   
-  # --- INNER LOOP: 20 Realizations of Noise ---
-  for(sim in 1:n_sims){
-    
-    # Generate fresh data for this realization
-    X <- rmvn(n, mu=rep(0, p), sigma=Sigma) 
-    W <- rnorm(n) # NEW measurement noise!
-    y <- X %*% theta0 + W # NEW response!
-    
-    # Fit Models
-    fit_sslasso <- SSLasso(X, y, alpha=alpha)
-    fit_multi_splitting <- hdi(X, y, method="multi.split", alpha=alpha)
-    fit_ridge_proj <- hdi(X, y, method="ridge.proj", alpha=alpha) 
-    fit_lasso_proj <- lasso.proj(X, y, alpha=alpha) 
-    
-    # Compute Metrics (Assume compute_metrics now returns a 1-row data.frame or named numeric vector)
-    # We drop thetahat from the return list for easier averaging, or handle it separately
-    sim_sslasso[[sim]] <- as.data.frame(compute_metrics(fit_sslasso$unb.coef, fit_sslasso$low.lim, fit_sslasso$up.lim, fit_sslasso$pvals, theta0, S, alpha))
-    sim_multi[[sim]] <- as.data.frame(compute_metrics(fit_multi_splitting$estimate, fit_multi_splitting$ci.lower, fit_multi_splitting$ci.upper, fit_multi_splitting$pval, theta0, S, alpha))
-    sim_ridge[[sim]] <- as.data.frame(compute_metrics(fit_ridge_proj$estimate, fit_ridge_proj$ci.lower, fit_ridge_proj$ci.upper, fit_ridge_proj$pval, theta0, S, alpha))
-    sim_lasso_proj[[sim]] <- as.data.frame(compute_metrics(fit_lasso_proj$estimate, fit_lasso_proj$ci.lower, fit_lasso_proj$ci.upper, fit_lasso_proj$pval, theta0, S, alpha))
-    
-    cat(sprintf("  Config %d: Finished simulation %d / %d\n", i, sim, n_sims))
-  }
+  sim_results <- foreach(sim = 1:n_sims, 
+                         .packages = c("mvnfast", "hdi"),
+                         .export = c("SSLasso", "compute_metrics")) %dopar% {
+                           
+                           source("lasso_inference.R", local = TRUE)
+                           source("setup.R", local = TRUE)
+                           set.seed(i * 1000 + sim)
+                           
+                           X <- rmvn(n, mu=rep(0, p), sigma=Sigma)
+                           W <- rnorm(n) 
+                           y <- as.numeric(X %*% theta0 + W) 
+                           
+                           # --- FIT MODELS ---
+                           fit_ss <- SSLasso(X, y, alpha=alpha)
+                           fit_ms <- multi.split(X, y)
+                           fit_rp <- ridge.proj(X, y)
+                           fit_lp <- lasso.proj(X, y)
+                           
+                           # --- MAP OUTPUTS TO COMPUTE_METRICS ---
+                           
+                           # 1. SS Lasso (Uses unb.coef, low.lim, up.lim, pvals)
+                           m_ss <- compute_metrics(fit_ss$unb.coef, fit_ss$low.lim, fit_ss$up.lim, fit_ss$pvals, theta0, S, alpha)
+                           
+                           # 2. Multi-Split (Uses estimate [if exists], lci, uci, pval)
+                           # Note: multi.split often doesn't return a point estimate. We pass NULL if missing.
+                           m_ms <- compute_metrics(NULL, fit_ms$lci, fit_ms$uci, fit_ms$pval.corr, theta0, S, alpha)
+                           
+                           # 3. Ridge Proj (Uses bhat, pval, and SE to build intervals)
+                           ci_low_rp <- fit_rp$bhat - z_crit * fit_rp$se
+                           ci_up_rp  <- fit_rp$bhat + z_crit * fit_rp$se
+                           m_rp <- compute_metrics(fit_rp$bhat, ci_low_rp, ci_up_rp, fit_rp$pval, theta0, S, alpha)
+                           
+                           # 4. Lasso Proj (Uses bhat, pval, and SE to build intervals)
+                           ci_low_lp <- fit_lp$bhat - z_crit * fit_lp$se
+                           ci_up_lp  <- fit_lp$bhat + z_crit * fit_lp$se
+                           m_lp <- compute_metrics(fit_lp$bhat, ci_low_lp, ci_up_lp, fit_lp$pval, theta0, S, alpha)
+                           
+                           list(sslasso = m_ss, multi = m_ms, ridge = m_rp, lasso_proj = m_lp)
+                         }
   
-  # --- AVERAGE THE 20 REALIZATIONS ---
-  # Bind the 20 rows together and calculate the column means
-  avg_sslasso <- colMeans(do.call(rbind, sim_sslasso), na.rm = TRUE)
-  avg_multi <- colMeans(do.call(rbind, sim_multi), na.rm = TRUE)
-  avg_ridge <- colMeans(do.call(rbind, sim_ridge), na.rm = TRUE)
-  avg_lasso_proj <- colMeans(do.call(rbind, sim_lasso_proj), na.rm = TRUE)
-  
-  # Compile final averaged results for this configuration
-  sim_res <- list(
-    params = list(n = n, p = p, s0 = s0, b = b, alpha = alpha),
+  # --- AGGREGATE ---
+  # These are now all named numeric vectors, so colMeans works perfectly.
+  res[[i]] <- list(
+    params = list(n = n, p = p, s0 = s0, b = b),
     metrics = list(
-      sslasso = avg_sslasso,
-      multi_split = avg_multi,
-      ridge_proj = avg_ridge,
-      lasso_proj = avg_lasso_proj
+      sslasso    = colMeans(do.call(rbind, lapply(sim_results, `[[`, "sslasso")), na.rm=TRUE),
+      multi_split= colMeans(do.call(rbind, lapply(sim_results, `[[`, "multi")), na.rm=TRUE),
+      ridge_proj = colMeans(do.call(rbind, lapply(sim_results, `[[`, "ridge")), na.rm=TRUE),
+      lasso_proj = colMeans(do.call(rbind, lapply(sim_results, `[[`, "lasso_proj")), na.rm=TRUE)
     )
   )
   
-  res[[i]] <- sim_res
-  cat(sprintf("COMPLETED CONFIGURATION %d / %d\n", i, config_no))
+  saveRDS(res, "res_commute_backup.rds")
 }
 
+stopCluster(cl)
 saveRDS(res, "res.rds")
