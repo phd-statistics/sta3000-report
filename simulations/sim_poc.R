@@ -67,9 +67,9 @@ ggplot(Sigma_df, aes(x = Col, y = Row, fill = Value)) +
   scale_y_reverse() + # Standard matrix view (row 1 at top)
   coord_fixed() +
   theme_minimal() +
-  labs(title = "Circulant Symmetric Matrix Sigma",
-       subtitle = "Highlighting bands at 0.1 and diagonal at 1",
-       fill = "Value")
+  labs(fill = "Value",
+       x= NULL,
+       y =NULL)
 
 ################################
 # Visualize SSLASSO Simulation #

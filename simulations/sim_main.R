@@ -12,19 +12,15 @@ cores_to_use <- 10
 cl <- makeCluster(cores_to_use, outfile = "") 
 registerDoParallel(cl)
 
+# Due to resource constrain, the
+# first 6 of the 12 configurations are considered
 configurations <- list(
   c(n=1000, p=600, s0=10, b=0.5),
   c(n=1000, p=600, s0=10, b=0.25),
   c(n=1000, p=600, s0=10, b=0.1),
   c(n=1000, p=600, s0=30, b=0.5),
   c(n=1000, p=600, s0=30, b=0.25),
-  c(n=1000, p=600, s0=30, b=0.1),
-  c(n=2000, p=1500, s0=50, b=0.5),
-  c(n=2000, p=1500, s0=50, b=0.25),
-  c(n=2000, p=1500, s0=50, b=0.1),
-  c(n=2000, p=1500, s0=25, b=0.1),
-  c(n=2000, p=1500, s0=25, b=0.1),
-  c(n=2000, p=1500, s0=25, b=0.1)
+  c(n=1000, p=600, s0=30, b=0.1)
 )
 
 config_no <- length(configurations)
@@ -96,8 +92,8 @@ for(i in 7:config_no){
       lasso_proj = colMeans(do.call(rbind, lapply(sim_results, `[[`, "lasso_proj")), na.rm=TRUE)
     )
   )
-  
-  saveRDS(res, "res_commute_backup.rds")
+  # If you want to have a checkpoint uncomment the line below.
+  # saveRDS(res, "res_backup.rds")
 }
 
 stopCluster(cl)
