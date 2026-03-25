@@ -25,7 +25,7 @@ pak::pkg_install(
 ```
 # Simulation Study
 
-To run the simulation study, ensure that you are in the in the `simulations` directory and run the following in the R console.
+To run the simulation study, ensure that you are in the in the `sims_and_da` directory and run the following in the R console.
 
 ```r
 source("sim_main.R")
