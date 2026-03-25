@@ -67,3 +67,17 @@ compute_metrics <- function(thetahat, ci_lower, ci_upper, pvals, theta0, S, alph
     MeanMSE = vec_mse
   ))
 }
+
+
+# Helper to build CI dataframe
+get_ci_data <- function(method_name, indices, bhat, low, up) {
+  data.frame(
+    Gene = gene_ids[indices], 
+    Index = factor(indices, levels = top_genes),
+    Estimate = if(is.null(bhat)) NA else bhat[indices],
+    Low = low[indices],
+    Up = up[indices],
+    Method = method_name
+  )
+}
+
